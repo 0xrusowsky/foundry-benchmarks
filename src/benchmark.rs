@@ -137,7 +137,7 @@ pub enum ProjectState<'url> {
 }
 
 /// Attempts to clone a project.
-pub fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'url> {
+fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'url> {
     let temp_dir = match TempDir::new() {
         Ok(td) => td,
         Err(e) => {
@@ -228,7 +228,7 @@ pub fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'u
 }
 
 /// Attempts to build a cloned project.
-pub fn try_build_project<'url>(cloned_state: Ready<'url>) -> ProjectState<'url> {
+fn try_build_project<'url>(cloned_state: Ready<'url>) -> ProjectState<'url> {
     let details = &cloned_state.details;
     let path_str = cloned_state.path.to_string_lossy();
 
@@ -296,7 +296,7 @@ pub fn try_build_project<'url>(cloned_state: Ready<'url>) -> ProjectState<'url> 
 }
 
 /// Attempts to run tests for a built project.
-pub fn try_test_project<'url>(
+fn try_test_project<'url>(
     built_state: Built<'url>,
     num_test_runs: usize,
     verbosity: Verbosity,
@@ -400,7 +400,7 @@ pub fn try_test_project<'url>(
 ///  1. Clone repositories from github (in parallel).
 ///  2. Run `forge build` (in parallel).
 ///  3. Run `forge test` (sequentially).
-pub fn run_benchmark_pipeline<'url>(
+pub fn run_pipeline<'url>(
     repo_urls: &'url [String],
     num_test_runs: usize,
     verbosity: Verbosity,

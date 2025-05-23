@@ -1,5 +1,5 @@
 mod benchmark;
-use benchmark::{Benchmarks, Source, run_benchmark_pipeline};
+use benchmark::{Benchmarks, Source};
 
 mod cmd;
 use cmd::{Cli, Parser};
@@ -18,7 +18,7 @@ fn main() -> Result<()> {
 
     match cli.get_cmd()? {
         None => {
-            let tested_projects = run_benchmark_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
+            let tested_projects = benchmark::run_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
             ui::banner(Some("BENCHMARK SUMMARY"));
 
             for project in tested_projects {
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
                     baseline.name()
                 ));
             };
-            let ref_tests = run_benchmark_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
+            let ref_tests = benchmark::run_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
 
             ui::big_banner(&format!(
                 "FOUNDRYUP --> comparison ({}: {})",
@@ -93,7 +93,7 @@ fn main() -> Result<()> {
                     comparison.name()
                 ));
             };
-            let vs_tests = run_benchmark_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
+            let vs_tests = benchmark::run_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
 
             let benchmarks = Benchmarks {
                 foundry_repo: &foundry_repo,
