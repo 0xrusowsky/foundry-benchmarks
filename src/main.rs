@@ -14,18 +14,18 @@ use yansi::Paint;
 fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let cli = Cli::parse();
-    let repo_urls = cli.repo_urls();
+    let repos = cli.get_repos();
 
     match cli.get_cmd()? {
         None => {
-            let tested_projects = benchmark::run_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
+            let tested_projects = benchmark::run_pipeline(&repos, cli.num_runs, cli.verbosity)?;
             ui::banner(Some("BENCHMARK SUMMARY"));
 
             for project in tested_projects {
                 println!(
                     " * {} ({})",
                     Paint::primary(&project.name).bold(),
-                    Paint::cyan(project.url)
+                    Paint::cyan(&project.url)
                 );
                 println!("   - build time: {:.2}s", project.build_time);
                 println!(
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
                     baseline.name()
                 ));
             };
-            let ref_tests = benchmark::run_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
+            let ref_tests = benchmark::run_pipeline(&repos, cli.num_runs, cli.verbosity)?;
 
             ui::big_banner(&format!(
                 "FOUNDRYUP --> comparison ({}: {})",
@@ -93,7 +93,7 @@ fn main() -> Result<()> {
                     comparison.name()
                 ));
             };
-            let vs_tests = benchmark::run_pipeline(&repo_urls, cli.num_runs, cli.verbosity)?;
+            let vs_tests = benchmark::run_pipeline(&repos, cli.num_runs, cli.verbosity)?;
 
             let benchmarks = Benchmarks {
                 foundry_repo: &foundry_repo,

@@ -1,13 +1,13 @@
 use eyre::{Context, Result};
 use rayon::prelude::*;
 use std::path::PathBuf;
-use std::{io::Write, process::Command, time::Instant};
+use std::{fs, io::Write, process::Command, time::Instant};
 use tempfile::TempDir;
 use yansi::Paint;
 
 use crate::cmd::Verbosity;
 use crate::ui;
-use crate::utils::GITHUB_URL;
+use crate::utils::{GITHUB_URL, ProjectConfig};
 
 /// Foundry source. Either a tagged version, or a branch.
 #[derive(Debug, Clone)]
@@ -46,39 +46,10 @@ impl<'url> Source<'url> {
     }
 }
 
-/// Basic information of a benchmarked project
-pub struct ProjectDetails<'url> {
-    pub name: String,
-    pub url: &'url str,
-    pub repo_label: String,
-}
-
-impl<'url> ProjectDetails<'url> {
-    pub fn new(url: &'url str) -> std::result::Result<Self, String> {
-        let chunks = url.rsplit('/').collect::<Vec<&str>>();
-        let repo_name = if chunks.len() >= 2 {
-            format!("{}/{}", chunks[1], chunks[0]).to_lowercase()
-        } else {
-            return Err(format!(
-                "Invalid URL (could not extract repo name): {}",
-                url
-            ));
-        };
-        let repo_label = format!("[{}]", repo_name);
-        let repo_label = Paint::cyan(&repo_label).bold().to_string();
-
-        Ok(ProjectDetails {
-            name: repo_name,
-            url,
-            repo_label,
-        })
-    }
-}
-
 /// State of a project after it has been successfully cloned.
 /// The `temp_dir` field owns the temporary directory, ensuring cleanup on drop.
 pub struct Ready<'url> {
-    pub details: ProjectDetails<'url>,
+    pub config: &'url ProjectConfig,
     pub path: PathBuf,
     pub _temp_dir: TempDir,
 }
@@ -90,19 +61,19 @@ pub struct Built<'url> {
 }
 
 /// Final state of a project after successful testing.
-pub struct Tested<'url> {
+pub struct Tested {
     pub name: String,
-    pub url: &'url str,
+    pub url: String,
     pub build_time: f64,
     pub avg_test_time: f64,
     pub runs: usize,
 }
 
-impl<'url> Tested<'url> {
-    fn new(built_state: Built<'url>, tests_times: Vec<f64>, runs: usize) -> Self {
+impl Tested {
+    fn new(built_state: Built<'_>, tests_times: Vec<f64>, runs: usize) -> Self {
         Tested {
-            name: built_state.state.details.name.clone(),
-            url: built_state.state.details.url,
+            name: built_state.state.config.name.clone(),
+            url: built_state.state.config.url(),
             build_time: built_state.build_time,
             avg_test_time: if runs > 0 {
                 tests_times.iter().sum::<f64>() / runs as f64
@@ -119,40 +90,40 @@ pub struct Benchmarks<'url> {
     pub foundry_repo: &'url str,
     pub verbosity: String,
     pub ref_source: Source<'url>,
-    pub ref_tests: Vec<Tested<'url>>,
+    pub ref_tests: Vec<Tested>,
     pub vs_source: Source<'url>,
-    pub vs_tests: Vec<Tested<'url>>,
+    pub vs_tests: Vec<Tested>,
 }
 
 /// Represents the state of a project during the benchmark pipeline.
 pub enum ProjectState<'url> {
     Cloned(Ready<'url>),
     Built(Built<'url>),
-    Tested(Tested<'url>),
+    Tested(Tested),
     Failed {
-        name: String,
+        name: &'url String,
         stage: &'static str,
         error: String,
     },
 }
 
 /// Attempts to clone a project.
-fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'url> {
+fn try_clone_project<'url>(repo: &'url ProjectConfig) -> ProjectState<'url> {
     let temp_dir = match TempDir::new() {
         Ok(td) => td,
         Err(e) => {
             let error_msg = format!(
                 "Failed to create temp directory for {}. Error: {:?}",
-                details.name, e
+                repo.name, e
             );
             eprintln!(
                 "{} {} {}",
-                &details.repo_label,
+                &repo.label(),
                 Paint::red("ERROR:").bold(),
                 error_msg
             );
             return ProjectState::Failed {
-                name: details.name,
+                name: &repo.name,
                 stage: "clone",
                 error: error_msg,
             };
@@ -163,8 +134,8 @@ fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'url> 
 
     println!(
         "{} Cloning {} into {}",
-        &details.repo_label,
-        Paint::cyan(details.url),
+        &repo.label(),
+        Paint::cyan(&repo.url()),
         Paint::yellow(&path_str)
     );
 
@@ -173,7 +144,7 @@ fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'url> 
             "clone",
             "--depth",
             "1",
-            details.url,
+            &repo.url(),
             path.to_str().expect("Path should be valid UTF-8"),
         ])
         .output()
@@ -182,16 +153,17 @@ fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'url> 
         Err(e) => {
             let error_msg = format!(
                 "Failed to execute git clone for {}. Error: {:?}",
-                details.url, e
+                repo.url(),
+                e
             );
             eprintln!(
                 "{} {} {}",
-                &details.repo_label,
+                &repo.label(),
                 Paint::red("ERROR:").bold(),
                 error_msg
             );
             return ProjectState::Failed {
-                name: details.name,
+                name: &repo.name,
                 stage: "clone",
                 error: error_msg,
             };
@@ -201,38 +173,92 @@ fn try_clone_project<'url>(details: ProjectDetails<'url>) -> ProjectState<'url> 
     if !clone_output.status.success() {
         let error_msg = format!(
             "Failed to clone {}. Git command exited with: {}.",
-            details.url, clone_output.status
+            repo.url(),
+            clone_output.status
         );
         ui::log_cmd_error(
             &clone_output.stderr,
             &format!(
                 "{} {} {}",
-                &details.repo_label,
+                &repo.label(),
                 Paint::red("ERROR:").bold(),
                 error_msg
             ),
         );
         return ProjectState::Failed {
-            name: details.name,
+            name: &repo.name,
             stage: "clone",
             error: error_msg,
         };
     }
-    println!("{} Cloned successfully.", &details.repo_label);
+    println!("{} Cloned successfully.", &repo.label());
 
     ProjectState::Cloned(Ready {
-        details,
+        config: repo,
         path,
         _temp_dir: temp_dir,
     })
 }
 
+/// Attemp to run custom installations for projects that need it.
+fn try_handle_custom_setup<'url>(state: &'url Ready) -> Result<(), String> {
+    let repo_label = &state.config.label();
+
+    // Install dependencies if specified.
+    if let Some(deps) = &state.config.dependencies {
+        println!("{repo_label} Running 'forge install' for custom dependencies");
+        let install_process = Command::new("forge")
+            .args(deps)
+            .current_dir(&state.path)
+            .output()
+            .map_err(|e| format!("Failed to execute 'forge install': {e:?}"))?;
+
+        if !install_process.status.success() {
+            let error_msg = format!("'forge install' failed");
+            ui::log_cmd_error(&install_process.stderr, &error_msg);
+            return Err(error_msg);
+        }
+        println!("{repo_label} Custom dependencies installed successfully.");
+    }
+
+    // Create custom `remappings.txt` if specified.
+    if let Some(remappings) = &state.config.remappings {
+        println!("{repo_label} Creating custom 'remappings.txt'");
+        let remappings_path = state.path.join("remappings.txt");
+        let remappings_content = remappings.join("\n");
+        fs::write(&remappings_path, remappings_content)
+            .map_err(|e| format!("Failed to write custom remappings.txt: {e:?}"))?;
+    }
+
+    // Create a `.env` file if environment variables are specified.
+    if let Some(env_vars) = &state.config.env_vars {
+        println!("{repo_label} Creating '.env' file");
+        let env_content = env_vars
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<String>>()
+            .join("\n");
+        let env_path = state.path.join(".env");
+        fs::write(env_path, env_content)
+            .map_err(|e| format!("Failed to write .env file: {e:?}"))?;
+    }
+    Ok(())
+}
+
 /// Attempts to build a cloned project.
 fn try_build_project<'url>(cloned_state: Ready<'url>) -> ProjectState<'url> {
-    let details = &cloned_state.details;
+    let config = &cloned_state.config;
     let path_str = cloned_state.path.to_string_lossy();
 
-    println!("{} Running 'forge build'", &details.repo_label);
+    if let Err(e) = try_handle_custom_setup(&cloned_state) {
+        return ProjectState::Failed {
+            name: &config.name,
+            stage: "build",
+            error: e,
+        };
+    }
+
+    println!("{} Running 'forge build'", &config.label());
     let start_time = Instant::now();
     let build_process = match Command::new("forge")
         .arg("build")
@@ -244,16 +270,16 @@ fn try_build_project<'url>(cloned_state: Ready<'url>) -> ProjectState<'url> {
         Err(e) => {
             let error_msg = format!(
                 "Failed to execute 'forge build' in {} for {}. Error: {:?}",
-                path_str, details.name, e
+                path_str, config.name, e
             );
             eprintln!(
                 "{} {} {}",
-                &details.repo_label,
+                &config.label(),
                 Paint::red("ERROR:").bold(),
                 error_msg
             );
             return ProjectState::Failed {
-                name: details.name.clone(),
+                name: &config.name,
                 stage: "build",
                 error: error_msg,
             };
@@ -264,7 +290,7 @@ fn try_build_project<'url>(cloned_state: Ready<'url>) -> ProjectState<'url> {
     if build_process.status.success() {
         println!(
             "{} {} Elapsed time: {}",
-            &details.repo_label,
+            &config.label(),
             Paint::yellow("BUILT!").bold(),
             Paint::yellow(format!("{elapsed:.2}s").as_str()).bold()
         );
@@ -275,20 +301,20 @@ fn try_build_project<'url>(cloned_state: Ready<'url>) -> ProjectState<'url> {
     } else {
         let error_msg = format!(
             "'forge build' for {} failed with exit code: {:?}.",
-            details.name,
+            config.name,
             build_process.status.code()
         );
         ui::log_cmd_error(
             &build_process.stderr,
             &format!(
                 "{} {} {}",
-                &details.repo_label,
+                &config.label(),
                 Paint::red("ERROR:").bold(),
                 error_msg
             ),
         );
         ProjectState::Failed {
-            name: details.name.clone(),
+            name: &config.name,
             stage: "build",
             error: error_msg,
         }
@@ -301,7 +327,7 @@ fn try_test_project<'url>(
     num_test_runs: usize,
     verbosity: Verbosity,
 ) -> ProjectState<'url> {
-    let details = &built_state.state.details;
+    let config = &built_state.state.config;
     let mut args = vec!["test"];
     let verbosity_flag = format!("-{}", "v".repeat(verbosity as usize));
     if verbosity != 0 {
@@ -312,10 +338,10 @@ fn try_test_project<'url>(
     for i in 0..num_test_runs {
         println!(
             "{} Running 'forge test' ({}/{}) for {}",
-            &details.repo_label,
+            &config.label(),
             i + 1,
             num_test_runs,
-            details.name
+            config.name
         );
 
         let start_at = Instant::now();
@@ -329,16 +355,16 @@ fn try_test_project<'url>(
             Err(e) => {
                 let error_msg = format!(
                     "Failed to execute 'forge test' for {}. Error: {:?}",
-                    details.name, e
+                    config.name, e
                 );
                 eprintln!(
                     "{} {} {}",
-                    &details.repo_label,
+                    &config.label(),
                     Paint::red("ERROR:").bold(),
                     error_msg
                 );
                 return ProjectState::Failed {
-                    name: details.name.clone(),
+                    name: &config.name,
                     stage: "test",
                     error: error_msg,
                 };
@@ -349,7 +375,7 @@ fn try_test_project<'url>(
         if test_process.status.success() {
             println!(
                 "{} {} Elapsed time: {}",
-                &details.repo_label,
+                &config.label(),
                 Paint::green("PASSED!").bold(),
                 Paint::green(format!("{elapsed:.2}s").as_str()).bold()
             );
@@ -357,20 +383,20 @@ fn try_test_project<'url>(
         } else {
             let error_msg = format!(
                 "'forge test' for {} FAILED with status code: {:?}",
-                details.name,
+                config.name,
                 test_process.status.code()
             );
             ui::log_cmd_error(
                 &test_process.stdout,
                 &format!(
                     "{} {} {}",
-                    &details.repo_label,
+                    &config.label(),
                     Paint::red("FAILED:").bold(),
                     error_msg
                 ),
             );
             return ProjectState::Failed {
-                name: details.name.clone(),
+                name: &config.name,
                 stage: "test",
                 error: error_msg,
             };
@@ -382,12 +408,12 @@ fn try_test_project<'url>(
     } else {
         let error_msg = format!(
             "Incomplete test runs for {} (expected {}, got {}).",
-            details.name,
+            config.name,
             num_test_runs,
             test_times.len()
         );
         ProjectState::Failed {
-            name: details.name.clone(),
+            name: &config.name,
             stage: "test",
             error: error_msg,
         }
@@ -401,44 +427,20 @@ fn try_test_project<'url>(
 ///  2. Run `forge build` (in parallel).
 ///  3. Run `forge test` (sequentially).
 pub fn run_pipeline<'url>(
-    repo_urls: &'url [String],
+    projects: &'url [ProjectConfig],
     num_test_runs: usize,
     verbosity: Verbosity,
-) -> Result<Vec<Tested<'url>>> {
-    let initial_projects: Vec<ProjectDetails> = repo_urls
-        .par_iter()
-        .filter_map(|url| match ProjectDetails::new(url) {
-            Ok(details) => Some(details),
-            Err(e) => {
-                eprintln!(
-                    "{} Failed to initialize project from URL {}: {}",
-                    Paint::red("ERROR:").bold(),
-                    url,
-                    e
-                );
-                None
-            }
-        })
-        .collect();
-
-    if initial_projects.is_empty() && !repo_urls.is_empty() {
-        return Err(eyre::eyre!(
-            "No projects could be initialized. Please check URLs and permissions."
-        ));
-    }
-    if initial_projects.is_empty() && repo_urls.is_empty() {
+) -> Result<Vec<Tested>> {
+    if projects.is_empty() {
         println!("No repository URLs provided to benchmark.");
         return Ok(Vec::new());
     }
 
     ui::banner(Some("CLONE PROJECTS (in parallel)"));
-    let cloned_outcomes: Vec<ProjectState> = initial_projects
-        .into_par_iter()
-        .map(try_clone_project)
-        .collect();
+    let cloned_outcomes: Vec<ProjectState> = projects.par_iter().map(try_clone_project).collect();
 
     let mut successfully_cloned: Vec<Ready> = Vec::new();
-    let mut failed_project_names: Vec<String> = Vec::new();
+    let mut failed_project_names: Vec<&String> = Vec::new();
 
     for outcome in cloned_outcomes {
         match outcome {
@@ -498,7 +500,7 @@ pub fn run_pipeline<'url>(
             "\n{}",
             Paint::yellow("Summary of projects that failed at some stage:").bold()
         );
-        let unique_failed_names: std::collections::HashSet<String> =
+        let unique_failed_names: std::collections::HashSet<&String> =
             failed_project_names.into_iter().collect();
         for name in unique_failed_names {
             println!(" - {}", name);

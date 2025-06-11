@@ -2,16 +2,10 @@ pub use clap::{ArgAction, Parser};
 use clap::{Args, Subcommand};
 use eyre::{Result, eyre};
 
-use crate::{Source, utils::GITHUB_URL};
-
-const DEFAULT_REPOS: [&str; 4] = [
-    "uniswap/v4-core",
-    "sparkdotfi/spark-psm",
-    "morpho-org/morpho-blue",
-    // "sablier-labs/lockup", // TODO: handle custom setup
-    "vectorized/solady",
-    // "euler-xyz/ethereum-vault-connector", // TODO: figure out why testing fails
-];
+use crate::{
+    Source,
+    utils::{ProjectConfig, default_repos},
+};
 
 pub type Verbosity = u8;
 
@@ -127,23 +121,28 @@ struct DiffConfig {
 }
 
 impl Cli {
-    pub fn repo_urls(&self) -> Vec<String> {
-        self.repos
-            .as_ref()
-            .and_then(|repos| {
-                Some(
-                    repos
-                        .into_iter()
-                        .map(|s| format!("{GITHUB_URL}/{}", s.trim()))
-                        .collect(),
-                )
-            })
-            .unwrap_or_else(|| {
-                DEFAULT_REPOS
-                    .iter()
-                    .map(|repo| format!("{GITHUB_URL}/{repo}"))
-                    .collect::<Vec<String>>()
-            })
+    /// Returns the list of projects to benchmark.
+    ///
+    /// * If specific repos are passed via the CLI, checks if they match any
+    /// default configurations. Otherwise, creates a new standard config.
+    /// * If no repos are passed, returns the full default list.
+    pub fn get_repos(&self) -> Vec<ProjectConfig> {
+        let default_repos = default_repos();
+
+        if let Some(repo_names) = &self.repos {
+            return repo_names
+                .iter()
+                .map(|repo_name| {
+                    default_repos
+                        .iter()
+                        .find(|default| default.name == *repo_name)
+                        .cloned()
+                        .unwrap_or_else(|| ProjectConfig::new(repo_name.clone()))
+                })
+                .collect();
+        }
+
+        default_repos
     }
 
     pub fn get_cmd(&self) -> Result<Option<(&String, Source, Source)>> {
