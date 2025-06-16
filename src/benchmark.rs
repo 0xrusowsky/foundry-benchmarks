@@ -201,11 +201,11 @@ fn try_clone_project<'url>(repo: &'url ProjectConfig) -> ProjectState<'url> {
 }
 
 /// Attemp to run custom installations for projects that need it.
-fn try_handle_custom_setup<'url>(state: &'url Ready) -> Result<(), String> {
+fn try_handle_custom_setup(state: &Ready) -> Result<(), String> {
     let repo_label = &state.config.label();
 
     // Install dependencies if specified.
-    if let Some(deps) = &state.config.dependencies {
+    if let Some(deps) = state.config.dependencies() {
         println!("{repo_label} Running 'forge install' for custom dependencies");
         let install_process = Command::new("forge")
             .args(deps)
@@ -214,7 +214,7 @@ fn try_handle_custom_setup<'url>(state: &'url Ready) -> Result<(), String> {
             .map_err(|e| format!("Failed to execute 'forge install': {e:?}"))?;
 
         if !install_process.status.success() {
-            let error_msg = format!("'forge install' failed");
+            let error_msg = "'forge install' failed".to_string();
             ui::log_cmd_error(&install_process.stderr, &error_msg);
             return Err(error_msg);
         }
@@ -222,7 +222,7 @@ fn try_handle_custom_setup<'url>(state: &'url Ready) -> Result<(), String> {
     }
 
     // Create custom `remappings.txt` if specified.
-    if let Some(remappings) = &state.config.remappings {
+    if let Some(remappings) = state.config.remappings() {
         println!("{repo_label} Creating custom 'remappings.txt'");
         let remappings_path = state.path.join("remappings.txt");
         let remappings_content = remappings.join("\n");
@@ -231,7 +231,7 @@ fn try_handle_custom_setup<'url>(state: &'url Ready) -> Result<(), String> {
     }
 
     // Create a `.env` file if environment variables are specified.
-    if let Some(env_vars) = &state.config.env_vars {
+    if let Some(env_vars) = state.config.env_vars() {
         println!("{repo_label} Creating '.env' file");
         let env_content = env_vars
             .iter()
@@ -426,8 +426,8 @@ fn try_test_project<'url>(
 ///  1. Clone repositories from github (in parallel).
 ///  2. Run `forge build` (in parallel).
 ///  3. Run `forge test` (sequentially).
-pub fn run_pipeline<'url>(
-    projects: &'url [ProjectConfig],
+pub fn run_pipeline(
+    projects: &[ProjectConfig],
     num_test_runs: usize,
     verbosity: Verbosity,
 ) -> Result<Vec<Tested>> {
@@ -448,7 +448,7 @@ pub fn run_pipeline<'url>(
             ProjectState::Failed {
                 name, stage, error, ..
             } => {
-                eprintln!("Project '{}' failed at stage '{}': {}", name, stage, error);
+                eprintln!("Project '{name}' failed at stage '{stage}': {error}");
                 failed_project_names.push(name);
             }
             _ => unreachable!("Unexpected outcome after cloning stage"),
@@ -468,7 +468,7 @@ pub fn run_pipeline<'url>(
             ProjectState::Failed {
                 name, stage, error, ..
             } => {
-                eprintln!("Project '{}' failed at stage '{}': {}", name, stage, error);
+                eprintln!("Project '{name}' failed at stage '{stage}': {error}");
                 failed_project_names.push(name);
             }
             _ => unreachable!("Unexpected outcome after building stage"),
@@ -488,7 +488,7 @@ pub fn run_pipeline<'url>(
             ProjectState::Failed {
                 name, stage, error, ..
             } => {
-                eprintln!("Project '{}' failed at stage '{}': {}", name, stage, error);
+                eprintln!("Project '{name}' failed at stage '{stage}': {error}");
                 failed_project_names.push(name);
             }
             _ => unreachable!("Unexpected outcome after testing stage"),
@@ -503,9 +503,79 @@ pub fn run_pipeline<'url>(
         let unique_failed_names: std::collections::HashSet<&String> =
             failed_project_names.into_iter().collect();
         for name in unique_failed_names {
-            println!(" - {}", name);
+            println!(" - {name}");
         }
     }
 
     Ok(final_results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_source_branch() {
+        let branch_name = String::from("feature-branch");
+        let source = Source::Branch(&branch_name);
+        
+        assert_eq!(source.short(), "-b");
+        assert_eq!(source.ty(), "branch");
+        assert_eq!(source.name(), "feature-branch");
+        assert_eq!(source.github_url("owner/repo"), "https://github.com/owner/repo/tree/feature-branch");
+    }
+
+    #[test]
+    fn test_source_version() {
+        let version_name = String::from("v1.2.3");
+        let source = Source::Version(&version_name);
+        
+        assert_eq!(source.short(), "-v");
+        assert_eq!(source.ty(), "version");
+        assert_eq!(source.name(), "v1.2.3");
+        assert_eq!(source.github_url("owner/repo"), "https://github.com/owner/repo/releases/tag/v1.2.3");
+    }
+
+    #[test]
+    fn test_tested_new() {
+        let config = ProjectConfig::new("test/repo");
+        let ready = Ready {
+            config: &config,
+            path: PathBuf::from("/tmp/test"),
+            _temp_dir: tempfile::tempdir().unwrap(),
+        };
+        let built = Built {
+            state: ready,
+            build_time: 5.5,
+        };
+        
+        let test_times = vec![1.0, 2.0, 3.0];
+        let tested = Tested::new(built, test_times, 3);
+        
+        assert_eq!(tested.name, "test/repo");
+        assert_eq!(tested.url, "https://github.com/test/repo");
+        assert_eq!(tested.build_time, 5.5);
+        assert_eq!(tested.avg_test_time, 2.0); // (1.0 + 2.0 + 3.0) / 3
+        assert_eq!(tested.runs, 3);
+    }
+
+    #[test]
+    fn test_tested_new_no_runs() {
+        let config = ProjectConfig::new("test/repo");
+        let ready = Ready {
+            config: &config,
+            path: PathBuf::from("/tmp/test"),
+            _temp_dir: tempfile::tempdir().unwrap(),
+        };
+        let built = Built {
+            state: ready,
+            build_time: 5.5,
+        };
+        
+        let test_times = vec![];
+        let tested = Tested::new(built, test_times, 0);
+        
+        assert_eq!(tested.avg_test_time, 0.0);
+        assert_eq!(tested.runs, 0);
+    }
 }

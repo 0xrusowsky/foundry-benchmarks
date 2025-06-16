@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         Some((foundry_repo, baseline, comparison)) => {
             ui::big_banner("FOUNDRY BENCHMARKS");
 
-            println!("Foundry Repo URL       {}", foundry_repo);
+            println!("Foundry Repo URL       {foundry_repo}");
             println!(
                 "Baseline source        {}: {}",
                 baseline.ty(),
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
             ));
             let status = Command::new("foundryup")
                 .arg("-r")
-                .arg(&foundry_repo)
+                .arg(foundry_repo)
                 .arg(baseline.short())
                 .arg(baseline.name())
                 .status();
@@ -81,7 +81,7 @@ fn main() -> Result<()> {
             ));
             let status = Command::new("foundryup")
                 .arg("-r")
-                .arg(&foundry_repo)
+                .arg(foundry_repo)
                 .arg(comparison.short())
                 .arg(comparison.name())
                 .status();
@@ -97,7 +97,7 @@ fn main() -> Result<()> {
             let vs_tests = benchmark::run_pipeline(&repos, cli.num_runs, cli.verbosity)?;
 
             let benchmarks = Benchmarks {
-                foundry_repo: &foundry_repo,
+                foundry_repo,
                 verbosity: if cli.verbosity != 0 {
                     format!("-{}", "v".repeat(cli.verbosity as usize))
                 } else {

@@ -32,8 +32,7 @@ pub fn log_test_table(b: &Benchmarks) {
         };
 
         println!(
-            "| {} | {:.2}s | {:.2}s | {:.1}% |",
-            project_link, before_time, after_time, overhead
+            "| {project_link} | {before_time:.2}s | {after_time:.2}s | {overhead:.1}% |"
         );
     }
 
