@@ -6,10 +6,7 @@ The tool is pre-configured with a list of popular, open-source repositories but 
 
 ## TODO
 
-- [ ] Support euler contracts (figure out why tests fail)
-- [ ] Support custom config via CLI (for non-default projects)
-- [ ] Add OZ and Ithaca contracts as default benchmarks
-
+- [ ] Support euler and OZ contracts (currently failing due to revm revert where timestamps must be <= u64)
 
 ## Features
 
@@ -18,7 +15,10 @@ The tool is pre-configured with a list of popular, open-source repositories but 
 - **Flexible Repository Targeting**: Use the default list of projects or provide your own list of repositories.
 - **Customizable Test Runs**: Configure the number of test runs to average results for more stable metrics.
 - **Markdown-Ready Output**: Generates a clean, shareable markdown table summarizing comparison results.
-- **Handles Custom Setups**: Automatically installs special dependencies for projects that require them.
+- **Custom Project Configurations**: Support for dependencies, remappings, and environment variables via TOML files or CLI flags.
+- **Per-Project Settings**: Configure each project individually with different dependencies and settings.
+- **Parallel Processing**: Clones and builds projects in parallel for faster benchmarking.
+- **Environment Variable Expansion**: Supports `${VAR_NAME}` syntax in configuration files.
 
 ## Prerequisites
 
@@ -116,14 +116,126 @@ cargo run -- diff \
   --comparison-branch your-feature-branch
 ```
 
+### Custom Project Configuration
+
+The tool supports three flexible ways to configure project settings: TOML configuration files, global CLI flags, and per-project JSON configurations.
+
+#### Using a TOML Configuration File
+
+The tool uses a `benchmarks.toml` file (default) that supports both custom and default configurations. The file the following sections:
+
+- `[custom]`: Your custom environment variables (takes precedence when no CLI args are provided)
+- `[defaults]`: Default environment variables (used as fallback)
+
+Where each section can have individual subsections:
+- `[[project]]`: Individual project configurations
+
+See `benchmarks.toml` for the complete configuration including all default repositories.
+
+**Config Priority Logic:**
+1. CLI arguments always take precedence
+2. If `[custom]` section has content and no CLI args are provided, it will be used
+3. Otherwise, `[defaults]` section will be used
+
+Example custom configuration:
+```toml
+# benchmarks.toml
+[custom]
+env_vars = { MAINNET_RPC_URL = "https://my-custom-rpc.com" }
+
+[[project]]
+name = "my-org/my-project"
+dependencies = ["install", "foundry-rs/forge-std@v1.8.0"]
+remappings = ["forge-std/=lib/forge-std/"]
+env_vars = { CUSTOM_VAR = "value" }
+```
+
+Run with default `benchmarks.toml` file:
+```sh
+cargo run
+```
+
+Or specify a custom config file:
+```sh
+cargo run -- --config my-config.toml
+```
+
+#### Using CLI Flags
+
+Apply the same configuration to all specified repositories:
+```sh
+cargo run -- --repos project-a,project-b \
+  --deps "install,forge-std" \
+  --remappings "forge-std/=lib/forge-std/" \
+  --env "MAINNET_RPC_URL=https://...,OTHER_VAR=value"
+```
+
+Note: When using CLI flags, they apply to all repositories specified with `--repos`.
+
+#### Per-Project JSON Configuration
+
+Configure each project individually with different settings:
+```sh
+cargo run -- \
+  --repo 'my-org/project-a:{"dependencies":["forge-std"]}' \
+  --repo 'my-org/project-b:{"remappings":["@oz/=lib/oz/"]}' \
+  --repo my-org/project-c
+```
+
+The JSON configuration supports:
+- `dependencies`: Array of forge dependencies to install
+- `remappings`: Array of import remappings
+- `env_vars`: Object with environment variable key-value pairs
+
+#### Configuration Priority
+
+When multiple configuration methods are used, they are applied in this order (highest to lowest priority):
+1. `--repo` flag with per-project JSON configuration
+2. `--repos` flag with global CLI flags (`--deps`, `--remappings`, `--env`)
+3. TOML configuration file (`--config` or default `benchmarks.toml`): `[custom]` section.
+4. TOML configuration file (`--config` or default `benchmarks.toml`): `[default]` section.
+
 ## Output Example
 
 When running the `diff` command, the tool generates a markdown table that's perfect for pasting into GitHub pull requests or issues.
 
-| Project | Before [master](https://github.com/foundry-rs/foundry/tree/master) | After [my-perf-opt](https://github.com/foundry-rs/foundry/tree/my-perf-opt) | Relative Diff |
-|---|---|---|---|
-| [uniswap/v4-core](https://github.com/uniswap/v4-core) | 5,43s | 5,11s | -5,9% |
-| [morpho-org/morpho-blue](https://github.com/morpho-org/morpho-blue) | 1,21s | 1,15s | -5,0% |
-| [sablier-labs/lockup](https://github.com/sablier-labs/lockup) | 2,56s | 2,60s | +1,6% |
+### Diff Mode Output
 
-> note: the reported times are the average of 10 runs.
+```
+## benchmarks `forge test`
+
+| Project | Before [master](https://github.com/foundry-rs/foundry/tree/master) | After [my-perf-opt](https://github.com/foundry-rs/foundry/tree/my-perf-opt) | Relative Diff |
+|---------|-----------|-------|-----------|
+| [uniswap/v4-core](https://github.com/uniswap/v4-core) | 12.45s | 10.23s | -17.8% |
+| [morpho-org/morpho-blue](https://github.com/morpho-org/morpho-blue) | 8.67s | 8.54s | -1.5% |
+| [sablier-labs/lockup](https://github.com/sablier-labs/lockup) | 15.23s | 14.89s | -2.2% |
+
+note: the reported times are the average of XX runs.
+```
+
+### Standard Mode Output
+
+```
+BENCHMARK SUMMARY
+------------------------------------------------------------------------
+ * uniswap/v4-core (https://github.com/uniswap/v4-core)
+   - build time: 4.56s
+   - test time:  12.45s (avg for XX runs)
+ * morpho-org/morpho-blue (https://github.com/morpho-org/morpho-blue)
+   - build time: 3.21s
+   - test time:  8.67s (avg for XX runs)
+------------------------------------------------------------------------
+```
+
+## Default Projects
+
+The tool comes pre-configured with several popular Foundry projects:
+
+- `uniswap/v4-core` - Uniswap V4 Core contracts
+- `sparkdotfi/spark-psm` - Spark Protocol PSM module
+- `morpho-org/morpho-blue` - Morpho Blue lending protocol
+- `vectorized/solady` - Gas-optimized Solidity snippets
+- `ithacaxyz/account` - Ithaca account abstraction
+- `sablier-labs/lockup` - Sablier V2 lockup streaming
+
+See `benchmarks.toml` for the full list and their configurations.

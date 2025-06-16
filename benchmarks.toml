@@ -1,0 +1,83 @@
+# -------------------------------------------------------------------------------------------------
+# -- CUSTOM PROJECTS ------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------
+
+# Custom configuration for foundry-benchmarks. If empty, and not overrriden by manual CLI args `[defaults]` will apply.
+# Note that CLI args always preceed the `.toml` config, even for `[custom]`.
+[custom]
+
+# Example: Adding your own custom project
+# [[project]]
+# name = "your-org/your-project"
+# dependencies = [
+#     "install",
+#     "foundry-rs/forge-std@v1.8.0",
+#     "your-org/custom-lib@v1.0.0"
+# ]
+# remappings = [
+#     "forge-std/=lib/forge-std/",
+#     "@custom/=lib/custom-lib/"
+# ]
+# env_vars = {
+#     MAINNET_RPC_URL = "${MAINNET_RPC_URL}",
+#     CUSTOM_API_KEY = "${CUSTOM_API_KEY}",
+#     FORK_BLOCK = "19000000"
+# }
+
+# -------------------------------------------------------------------------------------------------
+# -- DEFAULT PROJECTS -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------
+
+# Default repository configurations for foundry-benchmarks. Global defaults that apply to all projects unless overridden.
+[defaults]
+
+# Environment variables can use ${VAR_NAME} syntax to read from your environment
+env_vars = { MAINNET_RPC_URL = "${MAINNET_RPC_URL}" }
+
+# Each [[project]] entry defines configuration for one repository
+
+# Simple projects that don't need special configuration
+[[project]]
+name = "uniswap/v4-core"
+
+[[project]]
+name = "sparkdotfi/spark-psm"
+
+[[project]]
+name = "morpho-org/morpho-blue"
+
+[[project]]
+name = "vectorized/solady"
+
+[[project]]
+name = "ithacaxyz/account"
+
+# Complex project with dependencies, remappings, and environment variables
+[[project]]
+name = "sablier-labs/lockup"
+dependencies = [
+    "install",
+    "foundry-rs/forge-std",
+    "OpenZeppelin/openzeppelin-contracts@v5.0.2",
+    "PaulRBerg/prb-math@v4.1.0",
+    "vectorized/solady",
+    "evmcheb/solarray",
+]
+remappings = [
+    "forge-std/src/=lib/forge-std/src/",
+    "solarray/src/=lib/solarray/src/",
+    "solady/src/=lib/solady/src/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "@prb/math/=lib/prb-math/",
+    "node_modules/=lib/",
+]
+env_vars = { MAINNET_RPC_URL = "${MAINNET_RPC_URL}" }
+
+# Currently disabled projects (uncomment to enable)
+# These are commented out due to revm revert issues where timestamps must be <= u64
+
+# [[project]]
+# name = "euler-xyz/ethereum-vault-connector"
+
+# [[project]]
+# name = "openzeppelin/openzeppelin-contracts"

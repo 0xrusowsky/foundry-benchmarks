@@ -4,6 +4,7 @@ use benchmark::{Benchmarks, Source};
 mod cmd;
 use cmd::{Cli, Parser};
 
+mod config;
 mod ui;
 mod utils;
 
@@ -14,7 +15,7 @@ use yansi::Paint;
 fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let cli = Cli::parse();
-    let repos = cli.get_repos();
+    let repos = cli.get_repos()?;
 
     match cli.get_cmd()? {
         None => {

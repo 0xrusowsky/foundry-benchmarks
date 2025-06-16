@@ -1,14 +1,17 @@
-use dotenvy::dotenv;
-use std::{collections::HashMap, env};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub const GITHUB_URL: &str = "https://github.com";
 
 /// Represents the configuration for a benchmarkable project.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProjectConfig {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remappings: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub env_vars: Option<HashMap<String, String>>,
 }
 
@@ -64,40 +67,4 @@ impl ProjectConfig {
     pub fn label(&self) -> String {
         format!("[{name}]", name = self.name)
     }
-}
-
-/// Returns the default list of repositories to benchmark.
-pub fn default_repos() -> Vec<ProjectConfig> {
-    dotenv().ok();
-
-    // Load required env vars
-    const MAINNET_RPC_URL: &str = "MAINNET_RPC_URL";
-    let mainnet_rpc_url = env::var(MAINNET_RPC_URL).expect("env var 'MAINNET_RPC_URL' must be set");
-
-    // Initialize default project repos
-    vec![
-        ProjectConfig::new("uniswap/v4-core"),
-        ProjectConfig::new("sparkdotfi/spark-psm"),
-        ProjectConfig::new("morpho-org/morpho-blue"),
-        ProjectConfig::new("sablier-labs/lockup")
-            .with_deps(vec![
-                "install",
-                "foundry-rs/forge-std",
-                "OpenZeppelin/openzeppelin-contracts@v5.0.2",
-                "PaulRBerg/prb-math@v4.1.0",
-                "vectorized/solady",
-                "evmcheb/solarray",
-            ])
-            .with_remappings(vec![
-                "forge-std/src/=lib/forge-std/src/",
-                "solarray/src/=lib/solarray/src/",
-                "solady/src/=lib/solady/src/",
-                "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-                "@prb/math/=lib/prb-math/",
-                "node_modules/=lib/",
-            ])
-            .with_env_vars(vec![MAINNET_RPC_URL], vec![&mainnet_rpc_url]),
-        ProjectConfig::new("vectorized/solady"),
-        // ProjectConfig::new("euler-xyz/ethereum-vault-connector"), // TODO: figure out why testing fails,
-    ]
 }
