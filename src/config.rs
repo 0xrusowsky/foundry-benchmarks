@@ -81,7 +81,7 @@ impl ConfigFile {
         self.custom.env_vars.is_some()
     }
 
-    pub fn to_project_configs(&self, use_custom: bool) -> Vec<ProjectConfig> {
+    pub fn into_project_configs(self, use_custom: bool) -> Vec<ProjectConfig> {
         let global_env_vars = if use_custom && self.custom.env_vars.is_some() {
             self.custom.env_vars.clone()
         } else {
@@ -90,17 +90,17 @@ impl ConfigFile {
         .unwrap_or_default();
 
         self.project
-            .iter()
+            .into_iter()
             .map(|proj| {
                 // Apply env vars (merge with global)
                 let mut env_vars = global_env_vars.clone();
-                if let Some(proj_env_vars) = &proj.env_vars {
-                    env_vars.extend(proj_env_vars.clone());
+                if let Some(proj_env_vars) = proj.env_vars {
+                    env_vars.extend(proj_env_vars);
                 }
 
                 let json_config = JsonProjectConfig {
-                    dependencies: proj.dependencies.clone(),
-                    remappings: proj.remappings.clone(),
+                    dependencies: proj.dependencies,
+                    remappings: proj.remappings,
                     env_vars: if env_vars.is_empty() {
                         None
                     } else {
@@ -306,7 +306,7 @@ env_vars = { PROJECT_RPC = "${NONEXISTENT_RPC_URL}/v1" }
             )])),
         });
 
-        let projects = config.to_project_configs(true);
+        let projects = config.into_project_configs(true);
 
         assert_eq!(projects.len(), 1);
         let project = &projects[0];
@@ -347,7 +347,7 @@ env_vars = { PROJECT_RPC = "${NONEXISTENT_RPC_URL}/v1" }
             env_vars: None,
         });
 
-        let projects = config.to_project_configs(false);
+        let projects = config.into_project_configs(false);
 
         assert_eq!(projects.len(), 1);
         let project = &projects[0];

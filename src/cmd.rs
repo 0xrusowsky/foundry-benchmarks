@@ -3,7 +3,11 @@ use clap::{Args, Subcommand};
 use eyre::{Result, eyre};
 use std::collections::HashMap;
 
-use crate::{Source, config::ConfigFile, utils::{ProjectConfig, JsonProjectConfig}};
+use crate::{
+    Source,
+    config::ConfigFile,
+    utils::{JsonProjectConfig, ProjectConfig},
+};
 
 pub type Verbosity = u8;
 
@@ -164,7 +168,7 @@ impl Cli {
 
         let use_custom = file_config.has_custom_config() && !has_cli_overrides;
 
-        for project_config in file_config.to_project_configs(use_custom) {
+        for project_config in file_config.into_project_configs(use_custom) {
             configs.insert(project_config.name.clone(), project_config);
         }
 
@@ -174,8 +178,7 @@ impl Cli {
 
             for repo_name in repo_names {
                 let mut config = configs
-                    .get(repo_name)
-                    .cloned()
+                    .remove(repo_name)
                     .unwrap_or_else(|| ProjectConfig::new(repo_name));
 
                 // Apply global CLI overrides
@@ -208,7 +211,7 @@ impl Cli {
         // For --repo flag, we always use defaults since it's an explicit CLI override
         let use_custom = false;
 
-        for project_config in file_config.to_project_configs(use_custom) {
+        for project_config in file_config.into_project_configs(use_custom) {
             file_configs.insert(project_config.name.clone(), project_config);
         }
 
@@ -219,31 +222,30 @@ impl Cli {
                 let repo_name = &spec[..colon_pos];
                 let json_str = &spec[colon_pos + 1..];
 
-                // Start with existing config or create new
-                let base_config = file_configs
-                    .get(repo_name)
-                    .cloned()
-                    .unwrap_or_else(|| ProjectConfig::new(repo_name));
-
-                // Parse JSON config
+                // Parse JSON config first
                 let json_config: JsonProjectConfig = serde_json::from_str(json_str)
                     .map_err(|e| eyre!("Failed to parse JSON config for '{}': {}", repo_name, e))?;
 
-                // Merge configs: JSON overrides base
-                let merged_config = JsonProjectConfig {
-                    dependencies: json_config.dependencies.or(base_config.config.dependencies),
-                    remappings: json_config.remappings.or(base_config.config.remappings),
-                    env_vars: json_config.env_vars.or(base_config.config.env_vars),
-                };
+                // Start with existing config or create new
+                let mut base_config = file_configs
+                    .remove(repo_name)
+                    .unwrap_or_else(|| ProjectConfig::new(repo_name));
 
-                ProjectConfig {
-                    name: base_config.name,
-                    config: merged_config,
+                // Merge configs: JSON overrides base
+                if json_config.dependencies.is_some() {
+                    base_config.config.dependencies = json_config.dependencies;
                 }
+                if json_config.remappings.is_some() {
+                    base_config.config.remappings = json_config.remappings;
+                }
+                if json_config.env_vars.is_some() {
+                    base_config.config.env_vars = json_config.env_vars;
+                }
+
+                base_config
             } else {
                 file_configs
-                    .get(spec)
-                    .cloned()
+                    .remove(spec)
                     .unwrap_or_else(|| ProjectConfig::new(spec))
             };
 
@@ -425,10 +427,7 @@ name = "default/project"
         assert_eq!(repos.len(), 3);
 
         assert_eq!(repos[0].name, "test/repo1");
-        assert_eq!(
-            repos[0].dependencies().unwrap(),
-            &vec!["dep1", "dep2"]
-        );
+        assert_eq!(repos[0].dependencies().unwrap(), &vec!["dep1", "dep2"]);
 
         assert_eq!(repos[1].name, "test/repo2");
         assert_eq!(repos[1].remappings().unwrap(), &vec!["@lib/=lib/"]);
